@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Combat">
+<meta name="theme-color" content="#111111">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<title>Combat 課表</title>
+<style>
+  :root { --bg:#111; --card:#1c1c1e; --line:#2c2c2e; --text:#f2f2f2; --dim:#9a9a9f; --accent:#f97316; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:16px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", sans-serif;
+         padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px); }
+  h1 { font-size:22px; margin:4px 0 2px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:14px; }
+  .label { color:var(--dim); font-size:13px; margin:10px 0 6px; }
+  .chips { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+  .chips::-webkit-scrollbar { display:none; }
+  .chip { flex:0 0 auto; border:1px solid var(--line); background:var(--card); color:var(--text);
+          border-radius:12px; padding:8px 12px; font-size:15px; text-align:center; min-width:58px; }
+  .chip small { display:block; color:var(--dim); font-size:12px; line-height:1.2; }
+  .chip.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .chip.on small { color:#ffe4d0; }
+  .search { display:flex; gap:8px; margin-top:12px; }
+  .search input { flex:1; background:var(--card); border:1px solid var(--line); color:var(--text);
+                  border-radius:12px; padding:10px 12px; font-size:16px; }
+  .count { margin:18px 0 4px; color:var(--dim); font-size:14px; }
+  .day { margin-top:18px; color:var(--accent); font-weight:700; font-size:18px; }
+  .row { display:flex; gap:12px; padding:9px 2px; border-bottom:1px solid var(--line); align-items:baseline; }
+  .t { font-variant-numeric:tabular-nums; width:48px; color:var(--dim); }
+  .s { font-weight:600; min-width:72px; }
+  .tag { margin-left:auto; color:var(--accent); font-size:13px; }
+  .empty { color:var(--dim); margin-top:24px; text-align:center; }
+</style>
+</head>
+<body>
+<h1>BODYCOMBAT 課表</h1>
+<div class="sub">台北＋新北・<span id="updated">載入中…</span></div>
+
+<div class="label">日期（可多選）</div>
+<div class="chips" id="days"></div>
+
+<div class="label">時段</div>
+<div class="chips" id="slots"></div>
+
+<div class="search">
+  <input id="q" type="search" placeholder="或直接打：週三 週四 晚上 / 11/18 下午" enterkeyhint="search">
+</div>
+
+<div class="count" id="count"></div>
+<div id="list"></div>
+
+<script>
+const W = '日一二三四五六';
+const SLOTS = { '整天':['00:00','23:59'], '早上':['00:00','12:00'], '下午':['12:00','18:00'], '晚上':['18:00','23:59'] };
+let data = { classes: [] };
+let selDays = new Set();
+let slot = '整天';
+
+const tw = new Date(Date.now() + 8 * 3600e3);
+const today = new Date(Date.UTC(tw.getUTCFullYear(), tw.getUTCMonth(), tw.getUTCDate()));
+const ymd = d => d.toISOString().slice(0, 10);
+const addDays = n => new Date(today.getTime() + n * 864e5);
+const label = s => { const d = new Date(s + 'T00:00:00Z'); return `${d.getUTCMonth()+1}/${d.getUTCDate()}（${W[d.getUTCDay()]}）`; };
+
+function dayChips() {
+  const el = document.getElementById('days');
+  el.innerHTML = '';
+  const avail = [...new Set(data.classes.map(c => c.d))].filter(d => d >= ymd(today)).slice(0, 21);
+  avail.forEach((d, i) => {
+    const dt = new Date(d + 'T00:00:00Z');
+    const top = d === ymd(today) ? '今天' : d === ymd(addDays(1)) ? '明天' : '週' + W[dt.getUTCDay()];
+    const b = document.createElement('button');
+    b.className = 'chip' + (selDays.has(d) ? ' on' : '');
+    b.innerHTML = `${top}<small>${dt.getUTCMonth()+1}/${dt.getUTCDate()}</small>`;
+    b.onclick = () => { selDays.has(d) ? selDays.delete(d) : selDays.add(d); if (!selDays.size) selDays.add(d); document.getElementById('q').value=''; render(); };
+    el.appendChild(b);
+  });
+}
+
+function slotChips() {
+  const el = document.getElementById('slots');
+  el.innerHTML = '';
+  Object.keys(SLOTS).forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (k === slot ? ' on' : '');
+    b.textContent = k;
+    b.onclick = () => { slot = k; document.getElementById('q').value=''; render(); };
+    el.appendChild(b);
+  });
+}
+
+// 把「週三 週四 晚上」「11/18 下午」「明天」這類文字轉成日期與時段
+function parse(q) {
+  const ds = new Set();
+  for (const m of q.matchAll(/(\d{1,2})\s*[\/月]\s*(\d{1,2})/g)) {
+    let y = today.getUTCFullYear(); if (+m[1] < today.getUTCMonth() + 1) y++;
+    ds.add(ymd(new Date(Date.UTC(y, m[1] - 1, m[2]))));
+  }
+  const next = /下(?:個)?(?:週|周|星期|禮拜)/.test(q);
+  for (const m of q.matchAll(/(?:週|周|星期|禮拜)([日天一二三四五六])/g)) {
+    const w = m[1] === '天' ? 0 : W.indexOf(m[1]);
+    let k = w - today.getUTCDay(); if (k < 0) k += 7;
+    if (next) { const toMon = (8 - today.getUTCDay()) % 7 || 7; k = toMon + ((w + 6) % 7); }
+    ds.add(ymd(addDays(k)));
+  }
+  if (/今天/.test(q)) ds.add(ymd(today));
+  if (/明天/.test(q)) ds.add(ymd(addDays(1)));
+  if (/後天/.test(q)) ds.add(ymd(addDays(2)));
+  let s = null;
+  if (/早上|上午/.test(q)) s = '早上'; else if (/下午/.test(q)) s = '下午'; else if (/晚上/.test(q)) s = '晚上'; else if (/整天|全天/.test(q)) s = '整天';
+  return { ds, s };
+}
+
+function render() {
+  dayChips(); slotChips();
+  const [st, et] = SLOTS[slot];
+  const rows = data.classes.filter(c => selDays.has(c.d) && c.s >= st && c.s <= et);
+  document.getElementById('count').textContent = `共 ${rows.length} 堂`;
+  const list = document.getElementById('list');
+  if (!rows.length) { list.innerHTML = '<div class="empty">沒有符合的課</div>'; return; }
+  let h = '', cur = '';
+  for (const c of rows) {
+    if (c.d !== cur) { cur = c.d; h += `<div class="day">${label(c.d)}</div>`; }
+    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}</span>${c.sub ? '<span class="tag">代課</span>' : ''}</div>`;
+  }
+  list.innerHTML = h;
+}
+
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const { ds, s } = parse(e.target.value);
+  if (ds.size) selDays = ds;
+  if (s) slot = s;
+  e.target.blur();
+  render();
+});
+
+fetch('data.json?t=' + Date.now()).then(r => r.json()).then(j => {
+  data = j;
+  const mins = Math.round((Date.now() - new Date(j.updated)) / 60000);
+  document.getElementById('updated').textContent = mins < 60 ? `${mins} 分鐘前更新` : `${Math.round(mins/60)} 小時前更新`;
+  selDays = new Set([ymd(today)]);
+  render();
+}).catch(() => { document.getElementById('updated').textContent = '資料載入失敗'; });
+</script>
+</body>
+</html>
