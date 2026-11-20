@@ -58,7 +58,6 @@
 <script>
 const W = '日一二三四五六';
 const SLOTS = { '整天':['00:00','23:59'], '早上':['00:00','12:00'], '下午':['12:00','18:00'], '晚上':['18:00','23:59'] };
-let data = { classes: [] };
 let selDays = new Set();
 let slot = '整天';
 
@@ -71,7 +70,7 @@ const label = s => { const d = new Date(s + 'T00:00:00Z'); return `${d.getUTCMon
 function dayChips() {
   const el = document.getElementById('days');
   el.innerHTML = '';
-  const avail = [...new Set(data.classes.map(c => c.d))].filter(d => d >= ymd(today)).slice(0, 21);
+  const avail = Array.from({ length: 21 }, (_, i) => ymd(addDays(i)));
   avail.forEach((d, i) => {
     const dt = new Date(d + 'T00:00:00Z');
     const top = d === ymd(today) ? '今天' : d === ymd(addDays(1)) ? '明天' : '週' + W[dt.getUTCDay()];
@@ -117,19 +116,41 @@ function parse(q) {
   return { ds, s };
 }
 
+// 每天的資料分開存：days[日期] = { status: 'loading' | 'ok' | 'fail', classes, sources }
+const days = {};
+
+function loadDay(d) {
+  if (days[d] && days[d].status !== 'fail') return;
+  days[d] = { status: 'loading', classes: [] };
+  fetch('/api/classes?date=' + d, { signal: AbortSignal.timeout(20000) })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(j => { days[d] = { status: 'ok', classes: j.classes, sources: j.sources }; })
+    .catch(() => { days[d] = { status: 'fail', classes: [] }; })
+    .finally(render);
+}
+
 function render() {
   dayChips(); slotChips();
+  const sel = [...selDays].sort();
+  sel.forEach(loadDay);
   const [st, et] = SLOTS[slot];
-  const rows = data.classes.filter(c => selDays.has(c.d) && c.s >= st && c.s <= et);
-  document.getElementById('count').textContent = `共 ${rows.length} 堂`;
   const list = document.getElementById('list');
-  if (!rows.length) { list.innerHTML = '<div class="empty">沒有符合的課</div>'; return; }
-  let h = '', cur = '';
-  for (const c of rows) {
-    if (c.d !== cur) { cur = c.d; h += `<div class="day">${label(c.d)}</div>`; }
-    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}</span>${c.sub ? '<span class="tag">代課</span>' : ''}</div>`;
+  let h = '', total = 0, loading = 0, notes = [];
+  for (const d of sel) {
+    const day = days[d];
+    h += `<div class="day">${label(d)}</div>`;
+    if (day.status === 'loading') { loading++; h += '<div class="empty">載入中…（每天約需 5 秒）</div>'; continue; }
+    if (day.status === 'fail') { h += '<div class="empty">這天查詢失敗，請重新整理再試</div>'; continue; }
+    if (day.sources && !day.sources.app) notes.push(`${label(d)} App 課表沒回應，只顯示 wgc 資料`);
+    const rows = day.classes.filter(c => c.s >= st && c.s <= et);
+    total += rows.length;
+    if (!rows.length) { h += '<div class="empty">沒有符合的課</div>'; continue; }
+    for (const c of rows)
+      h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}</span>${c.sub ? '<span class="tag">代課</span>' : ''}</div>`;
   }
   list.innerHTML = h;
+  document.getElementById('count').textContent = loading ? `載入中…` : `共 ${total} 堂`;
+  setStatus(notes.length ? notes.join('；') : '即時資料（World Gym App 課表＋wgc）');
 }
 
 document.getElementById('q').addEventListener('keydown', e => {
@@ -141,18 +162,9 @@ document.getElementById('q').addEventListener('keydown', e => {
   render();
 });
 
-// ---- 資料來源：即時向自己的 Vercel 伺服器要課表，失敗才用舊的 data.json ----
 const setStatus = t => { document.getElementById('updated').textContent = t; };
-const ago = iso => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`; };
 selDays = new Set([ymd(today)]);
-setStatus('載入中…');
-
-fetch('/api/classes', { signal: AbortSignal.timeout(20000) })
-  .then(r => r.ok ? r.json() : Promise.reject(r.status))
-  .then(j => { data = j; setStatus(`即時資料（${ago(j.updated)}更新）`); render(); })
-  .catch(() => fetch('data.json?t=' + Date.now()).then(r => r.json())
-    .then(j => { data = j; setStatus(`即時抓取失敗，顯示 ${ago(j.updated)}的備用資料`); render(); })
-    .catch(() => setStatus('資料載入失敗，請稍後再試')));
+render();
 </script>
 </body>
 </html>
