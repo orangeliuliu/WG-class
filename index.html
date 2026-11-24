@@ -174,7 +174,7 @@ function render() {
   count.textContent = `共 ${rows.length} 堂`;
   if (!rows.length) { list.innerHTML = h + '<div class="empty">沒有符合的課</div>'; return; }
   for (const c of rows)
-    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}${c.sub ? '<span class="tag">(代)</span>' : ''}</span></div>`;
+    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}${c.sub ? `<span class="tag">(代${c.orig ? ' ' + c.orig : ''})</span>` : ''}</span></div>`;
   list.innerHTML = h;
 }
 
