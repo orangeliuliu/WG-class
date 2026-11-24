@@ -41,7 +41,7 @@
   .row { display:flex; gap:12px; padding:9px 2px; border-bottom:1px solid var(--line); align-items:baseline; }
   .t { font-variant-numeric:tabular-nums; width:48px; color:var(--dim); }
   .s { font-weight:600; min-width:72px; }
-  .tag { margin-left:auto; color:var(--accent); font-size:13px; }
+  .tag { margin-left:4px; color:var(--accent); font-size:13px; }
   .empty { color:var(--dim); margin-top:24px; text-align:center; }
 </style>
 </head>
@@ -174,7 +174,7 @@ function render() {
   count.textContent = `共 ${rows.length} 堂`;
   if (!rows.length) { list.innerHTML = h + '<div class="empty">沒有符合的課</div>'; return; }
   for (const c of rows)
-    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}</span>${c.sub ? '<span class="tag">代課</span>' : ''}</div>`;
+    h += `<div class="row"><span class="t">${c.s}</span><span class="s">${c.store}</span><span>${c.teacher}${c.sub ? '<span class="tag">(代)</span>' : ''}</span></div>`;
   list.innerHTML = h;
 }
 
